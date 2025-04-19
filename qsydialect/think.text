@@ -1,0 +1,9 @@
+if we want to create a struct named User
+now we can code
+type User Struct{
+  Name String 'qsyorm:"PRIMARY KEY"'
+  Age Int
+}
+So we want to a sql that "CREATE TABLE 'User' ('Name' text PRIMARY KEY, 'Age' integer);
+
+
