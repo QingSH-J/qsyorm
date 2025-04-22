@@ -343,41 +343,65 @@ func createTable(tableName string, columns []map[string]string) error {
 	// 构建创建表的SQL
 	var columnDefs []string
 
+	log.Printf("创建表 %s，列定义: %v", tableName, columns)
+
 	for _, col := range columns {
 		columnName := col["name"]
 		columnType := col["type"]
+
+		log.Printf("处理列: %s, 类型: %s", columnName, columnType)
 
 		// 构建列定义
 		var constraints []string
 
 		if col["primaryKey"] == "true" {
 			constraints = append(constraints, "PRIMARY KEY")
+			log.Printf("列 %s 设为主键", columnName)
 		}
 
 		if col["autoIncrement"] == "true" {
 			constraints = append(constraints, "AUTOINCREMENT")
+			log.Printf("列 %s 设为自增", columnName)
 		}
 
 		if col["notNull"] == "true" {
 			constraints = append(constraints, "NOT NULL")
+			log.Printf("列 %s 设为非空", columnName)
 		}
 
 		if col["unique"] == "true" {
 			constraints = append(constraints, "UNIQUE")
+			log.Printf("列 %s 设为唯一", columnName)
 		}
 
 		definition := fmt.Sprintf("%s %s %s", columnName, columnType, strings.Join(constraints, " "))
 		columnDefs = append(columnDefs, strings.TrimSpace(definition))
+		log.Printf("最终列定义: %s", strings.TrimSpace(definition))
 	}
 
 	// 创建表的SQL
 	createSQL := fmt.Sprintf("CREATE TABLE %s (%s);", tableName, strings.Join(columnDefs, ", "))
+	log.Printf("执行SQL: %s", createSQL)
 
 	// 执行创建表操作
 	session := dbEngine.NewSession()
 	_, err := session.Raw(createSQL).Exec()
+	if err != nil {
+		log.Printf("创建表失败: %v", err)
+		return err
+	}
 
-	return err
+	log.Printf("成功创建表 %s", tableName)
+	return nil
+}
+
+// 获取map的所有键
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func main() {
@@ -1327,263 +1351,17 @@ func main() {
 
 	// GET handler for SQL page
 	r.GET("/sql", func(c *gin.Context) {
-		html := `
-		<!DOCTYPE html>
-		<html>
-		<head>
-			<title>QSyORM 数据库管理器</title>
-			<meta charset="UTF-8">
-			<meta name="viewport" content="width=device-width, initial-scale=1.0">
-			<style>
-				body {
-					font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-					line-height: 1.5;
-					color: #333;
-					max-width: 1200px;
-					margin: 0 auto;
-					padding: 20px;
-				}
-				h1, h2 {
-					color: #333;
-				}
-				table {
-					width: 100%;
-					border-collapse: collapse;
-					margin-bottom: 20px;
-				}
-				th, td {
-					border: 1px solid #ddd;
-					padding: 8px 12px;
-					text-align: left;
-				}
-				th {
-					background-color: #f5f5f5;
-					font-weight: bold;
-				}
-				tr:nth-child(even) {
-					background-color: #f9f9f9;
-				}
-				tr:hover {
-					background-color: #f1f1f1;
-				}
-				.nav {
-					display: flex;
-					margin-bottom: 20px;
-					gap: 10px;
-					align-items: center;
-				}
-				.nav a {
-					padding: 8px 16px;
-					background-color: #f1f1f1;
-					color: #333;
-					text-decoration: none;
-					border-radius: 4px;
-				}
-				.nav a:hover {
-					background-color: #ddd;
-				}
-				textarea {
-					width: 100%;
-					height: 150px;
-					padding: 10px;
-					margin-bottom: 10px;
-					font-family: monospace;
-				}
-				button {
-					padding: 8px 16px;
-					background-color: #4CAF50;
-					color: white;
-					border: none;
-					border-radius: 4px;
-					cursor: pointer;
-				}
-				button:hover {
-					background-color: #45a049;
-				}
-			</style>
-		</head>
-		<body>
-			<h1>QSyORM 数据库管理器</h1>
-			<div class="nav">
-				<a href="/">表列表</a>
-				<a href="/sql">执行SQL</a>
-				<a href="/create">创建表</a>
-			</div>
-			
-			<h2>执行SQL</h2>
-			
-			<form method="post" action="/sql">
-				<textarea name="sql" placeholder="输入SQL查询..."></textarea>
-				<button type="submit">执行</button>
-			</form>
-		</body>
-		</html>
-		`
-		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+		// 注意这里使用的是"sql.html"，它会自动包含layout和content.sql.html
+		c.HTML(http.StatusOK, "sql.html", gin.H{
+			"sqlText":  "",
+			"executed": false,
+		})
 	})
 
 	// GET handler for Create Table page
 	r.GET("/create", func(c *gin.Context) {
-		html := `
-		<!DOCTYPE html>
-		<html>
-		<head>
-			<title>QSyORM 数据库管理器</title>
-			<meta charset="UTF-8">
-			<meta name="viewport" content="width=device-width, initial-scale=1.0">
-			<style>
-				body {
-					font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-					line-height: 1.5;
-					color: #333;
-					max-width: 1200px;
-					margin: 0 auto;
-					padding: 20px;
-				}
-				h1, h2 {
-					color: #333;
-				}
-				.nav {
-					display: flex;
-					margin-bottom: 20px;
-					gap: 10px;
-					align-items: center;
-				}
-				.nav a {
-					padding: 8px 16px;
-					background-color: #f1f1f1;
-					color: #333;
-					text-decoration: none;
-					border-radius: 4px;
-				}
-				.nav a:hover {
-					background-color: #ddd;
-				}
-				form {
-					margin-bottom: 20px;
-				}
-				.column-form {
-					margin-bottom: 15px;
-					padding: 10px;
-					border: 1px solid #ddd;
-					border-radius: 4px;
-				}
-				label {
-					display: inline-block;
-					width: 80px;
-					margin-bottom: 5px;
-				}
-				input[type="text"], select {
-					width: 200px;
-					padding: 5px;
-					margin-bottom: 10px;
-				}
-				.checkbox-group {
-					margin-top: 10px;
-				}
-				.checkbox-group label {
-					width: auto;
-					margin-right: 15px;
-				}
-				button {
-					padding: 8px 16px;
-					background-color: #4CAF50;
-					color: white;
-					border: none;
-					border-radius: 4px;
-					cursor: pointer;
-					margin-top: 10px;
-				}
-				button:hover {
-					background-color: #45a049;
-				}
-			</style>
-		</head>
-		<body>
-			<h1>QSyORM 数据库管理器</h1>
-			<div class="nav">
-				<a href="/">表列表</a>
-				<a href="/sql">执行SQL</a>
-				<a href="/create">创建表</a>
-			</div>
-			
-			<h2>创建新表</h2>
-			
-			<form id="createTableForm" method="post" action="/create">
-				<div>
-					<label for="tableName">表名:</label>
-					<input type="text" id="tableName" name="tableName" required>
-				</div>
-				
-				<h3>列定义</h3>
-				<div id="columns"></div>
-				
-				<div class="add-column">
-					<button type="button" id="addColumn">添加列</button>
-				</div>
-				
-				<input type="hidden" id="columnCount" name="columnCount" value="0">
-				<button type="submit">创建表</button>
-			</form>
-			
-			<script>
-				let columnCount = 0;
-				
-				function addColumn() {
-					const columnsDiv = document.getElementById('columns');
-					const columnDiv = document.createElement('div');
-					columnDiv.className = 'column-form';
-					
-					columnDiv.innerHTML = '' +
-						'<div>' +
-							'<label for="column[' + columnCount + '][name]">列名:</label>' +
-							'<input type="text" name="column[' + columnCount + '][name]" required>' +
-						'</div>' +
-						'<div>' +
-							'<label for="column[' + columnCount + '][type]">类型:</label>' +
-							'<select name="column[' + columnCount + '][type]" required>' +
-								'<option value="INTEGER">INTEGER</option>' +
-								'<option value="TEXT">TEXT</option>' +
-								'<option value="REAL">REAL</option>' +
-								'<option value="BLOB">BLOB</option>' +
-								'<option value="BOOLEAN">BOOLEAN</option>' +
-							'</select>' +
-						'</div>' +
-						'<div class="checkbox-group">' +
-							'<label>' +
-								'<input type="checkbox" name="column[' + columnCount + '][primaryKey]" value="true">' +
-								'主键' +
-							'</label>' +
-							'<label>' +
-								'<input type="checkbox" name="column[' + columnCount + '][autoIncrement]" value="true">' +
-								'自增' +
-							'</label>' +
-							'<label>' +
-								'<input type="checkbox" name="column[' + columnCount + '][notNull]" value="true">' +
-								'非空' +
-							'</label>' +
-							'<label>' +
-								'<input type="checkbox" name="column[' + columnCount + '][unique]" value="true">' +
-								'唯一' +
-							'</label>' +
-						'</div>';
-					
-					columnsDiv.appendChild(columnDiv);
-					columnCount++;
-					document.getElementById('columnCount').value = columnCount;
-				}
-				
-				document.getElementById('addColumn').addEventListener('click', addColumn);
-				
-				// 初始添加一列
-				document.addEventListener('DOMContentLoaded', function() {
-					addColumn();
-				});
-			</script>
-		</body>
-		</html>
-		`
-		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+		// 使用"create_table.html"，它会自动包含layout和content.create_table.html
+		c.HTML(http.StatusOK, "create_table.html", gin.H{})
 	})
 
 	// 执行SQL查询
@@ -1594,47 +1372,135 @@ func main() {
 			return
 		}
 
-		results, err := executeQuerySQL(sqlText)
-		if err != nil {
-			c.HTML(http.StatusInternalServerError, "error.html", gin.H{
-				"error": err.Error(),
-			})
-			return
+		// 判断SQL类型：是SELECT查询还是非查询语句
+		sqlType := "query"
+		sqlLower := strings.ToLower(strings.TrimSpace(sqlText))
+		if strings.HasPrefix(sqlLower, "insert") ||
+			strings.HasPrefix(sqlLower, "update") ||
+			strings.HasPrefix(sqlLower, "delete") ||
+			strings.HasPrefix(sqlLower, "create") ||
+			strings.HasPrefix(sqlLower, "drop") ||
+			strings.HasPrefix(sqlLower, "alter") {
+			sqlType = "execute"
 		}
 
-		c.HTML(http.StatusOK, "sql.html", gin.H{
-			"sqlText": sqlText,
-			"results": results,
-			"columns": results[0],
-		})
+		if sqlType == "query" {
+			// 处理查询SQL（SELECT）
+			results, err := executeQuerySQL(sqlText)
+			if err != nil {
+				c.HTML(http.StatusInternalServerError, "error.html", gin.H{
+					"error": err.Error(),
+				})
+				return
+			}
+
+			if len(results) == 0 {
+				// 如果查询结果为空
+				c.HTML(http.StatusOK, "sql.html", gin.H{
+					"sqlText":  sqlText,
+					"executed": true,
+					"results":  results,
+					"columns":  []string{},
+					"success":  "查询执行成功，返回0行结果。",
+				})
+				return
+			}
+
+			c.HTML(http.StatusOK, "sql.html", gin.H{
+				"sqlText":  sqlText,
+				"executed": true,
+				"results":  results,
+				"columns":  getMapKeys(results[0]),
+			})
+		} else {
+			// 处理非查询SQL（INSERT/UPDATE/DELETE）
+			rowsAffected, err := executeSQL(sqlText)
+			if err != nil {
+				c.HTML(http.StatusInternalServerError, "error.html", gin.H{
+					"error": err.Error(),
+				})
+				return
+			}
+
+			c.HTML(http.StatusOK, "sql.html", gin.H{
+				"sqlText":  sqlText,
+				"executed": true,
+				"success":  fmt.Sprintf("SQL执行成功，影响了 %d 行记录。", rowsAffected),
+			})
+		}
 	})
 
 	// 创建新表
 	r.POST("/create", func(c *gin.Context) {
 		tableName := c.PostForm("tableName")
-		columnCount := c.PostForm("columnCount")
+		log.Printf("收到创建表请求，表名: %s", tableName)
+
+		columnCount, err := strconv.Atoi(c.PostForm("columnCount"))
+		if err != nil {
+			log.Printf("解析columnCount失败: %v", err)
+			c.HTML(http.StatusBadRequest, "error.html", gin.H{
+				"error": fmt.Sprintf("解析列数量失败: %v", err),
+			})
+			return
+		}
+
+		log.Printf("表单提交的列数量: %d", columnCount)
 		columns := make([]map[string]string, 0)
 
-		for i := 0; i < len(c.PostFormArray("column["+columnCount+"]")); i++ {
-			column := map[string]string{
-				"name":          c.PostForm("column[" + columnCount + "][" + strconv.Itoa(i) + "][name]"),
-				"type":          c.PostForm("column[" + columnCount + "][" + strconv.Itoa(i) + "][type]"),
-				"primaryKey":    c.PostForm("column[" + columnCount + "][" + strconv.Itoa(i) + "][primaryKey]"),
-				"autoIncrement": c.PostForm("column[" + columnCount + "][" + strconv.Itoa(i) + "][autoIncrement]"),
-				"notNull":       c.PostForm("column[" + columnCount + "][" + strconv.Itoa(i) + "][notNull]"),
-				"unique":        c.PostForm("column[" + columnCount + "][" + strconv.Itoa(i) + "][unique]"),
+		// 遍历所有列
+		for i := 0; i < columnCount; i++ {
+			// 检查列名是否存在
+			columnName := c.PostForm(fmt.Sprintf("column[%d][name]", i))
+			log.Printf("处理第 %d 列，名称: %s", i, columnName)
+
+			if columnName == "" {
+				log.Printf("第 %d 列名为空，跳过", i)
+				continue // 跳过空列
 			}
+
+			column := map[string]string{
+				"name":          columnName,
+				"type":          c.PostForm(fmt.Sprintf("column[%d][type]", i)),
+				"primaryKey":    c.PostForm(fmt.Sprintf("column[%d][primaryKey]", i)),
+				"autoIncrement": c.PostForm(fmt.Sprintf("column[%d][autoIncrement]", i)),
+				"notNull":       c.PostForm(fmt.Sprintf("column[%d][notNull]", i)),
+				"unique":        c.PostForm(fmt.Sprintf("column[%d][unique]", i)),
+			}
+			log.Printf("第 %d 列的完整定义: %v", i, column)
 			columns = append(columns, column)
 		}
 
-		err := createTable(tableName, columns)
+		log.Printf("总共解析了 %d 列", len(columns))
+
+		// 确保至少有一列
+		if len(columns) == 0 {
+			log.Printf("错误: 没有有效的列定义")
+			c.HTML(http.StatusBadRequest, "error.html", gin.H{
+				"error": "表必须至少包含一列",
+			})
+			return
+		}
+
+		// 表名不能为空
+		if tableName == "" {
+			log.Printf("错误: 表名为空")
+			c.HTML(http.StatusBadRequest, "error.html", gin.H{
+				"error": "表名不能为空",
+			})
+			return
+		}
+
+		// 创建表
+		err = createTable(tableName, columns)
 		if err != nil {
+			log.Printf("调用createTable失败: %v", err)
 			c.HTML(http.StatusInternalServerError, "error.html", gin.H{
 				"error": err.Error(),
 			})
 			return
 		}
 
+		log.Printf("表 %s 创建成功，重定向到首页", tableName)
 		c.Redirect(http.StatusFound, "/")
 	})
 
@@ -1659,7 +1525,7 @@ func createTemplate() *template.Template {
 			margin: 0 auto;
 			padding: 20px;
 		}
-		h1, h2 {
+		h1, h2, h3 {
 			color: #333;
 		}
 		.error {
@@ -1669,6 +1535,16 @@ func createTemplate() *template.Template {
 			padding: 10px;
 			border-radius: 4px;
 			margin-bottom: 20px;
+		}
+		.alert {
+			padding: 10px;
+			border-radius: 4px;
+			margin-bottom: 20px;
+		}
+		.success {
+			color: #155724;
+			background-color: #d4edda;
+			border: 1px solid #c3e6cb;
 		}
 		.nav {
 			display: flex;
@@ -1686,6 +1562,83 @@ func createTemplate() *template.Template {
 		.nav a:hover {
 			background-color: #ddd;
 		}
+		pre {
+			background-color: #f8f9fa;
+			padding: 10px;
+			border-radius: 4px;
+			border: 1px solid #e9ecef;
+			margin-bottom: 20px;
+			overflow-x: auto;
+		}
+		textarea {
+			width: 100%;
+			height: 150px;
+			padding: 10px;
+			margin-bottom: 10px;
+			font-family: monospace;
+			border: 1px solid #ced4da;
+			border-radius: 4px;
+		}
+		button {
+			padding: 8px 16px;
+			background-color: #4CAF50;
+			color: white;
+			border: none;
+			border-radius: 4px;
+			cursor: pointer;
+		}
+		button:hover {
+			background-color: #45a049;
+		}
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			margin-bottom: 20px;
+		}
+		th, td {
+			border: 1px solid #ddd;
+			padding: 8px 12px;
+			text-align: left;
+		}
+		th {
+			background-color: #f5f5f5;
+			font-weight: bold;
+		}
+		tr:nth-child(even) {
+			background-color: #f9f9f9;
+		}
+		tr:hover {
+			background-color: #f1f1f1;
+		}
+		form {
+			margin-bottom: 20px;
+		}
+		.column-form {
+			margin-bottom: 15px;
+			padding: 10px;
+			border: 1px solid #ddd;
+			border-radius: 4px;
+			background-color: #f9f9f9;
+		}
+		label {
+			display: inline-block;
+			width: 80px;
+			margin-bottom: 5px;
+		}
+		input[type="text"], select {
+			width: 200px;
+			padding: 5px;
+			margin-bottom: 10px;
+			border: 1px solid #ced4da;
+			border-radius: 4px;
+		}
+		.checkbox-group {
+			margin-top: 10px;
+		}
+		.checkbox-group label {
+			width: auto;
+			margin-right: 15px;
+		}
 	</style>
 </head>
 <body>
@@ -1699,6 +1652,7 @@ func createTemplate() *template.Template {
 
 {{define "sql.html"}}
 {{template "layout" .}}
+{{template "content.sql.html" .}}
 {{end}}
 
 {{define "content.sql.html"}}
@@ -1748,6 +1702,7 @@ func createTemplate() *template.Template {
 
 {{define "create_table.html"}}
 {{template "layout" .}}
+{{template "content.create_table.html" .}}
 {{end}}
 
 {{define "content.create_table.html"}}
@@ -1820,11 +1775,30 @@ func createTemplate() *template.Template {
             document.getElementById('columnCount').value = columnCount;
         }
         
-        document.getElementById('addColumn').addEventListener('click', addColumn);
-        
-        // 初始添加一列
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener("DOMContentLoaded", function() {
+            document.getElementById('addColumn').addEventListener('click', addColumn);
+            
+            // 初始添加一列
             addColumn();
+            
+            // 提交表单前验证
+            document.getElementById('createTableForm').addEventListener('submit', function(e) {
+                const tableName = document.getElementById('tableName').value;
+                if (!tableName) {
+                    alert('请输入表名');
+                    e.preventDefault();
+                    return false;
+                }
+                
+                const columns = document.querySelectorAll('.column-form');
+                if (columns.length === 0) {
+                    alert('请至少添加一列');
+                    e.preventDefault();
+                    return false;
+                }
+                
+                return true;
+            });
         });
     </script>
 {{end}}
