@@ -188,6 +188,11 @@ func (s *Session) Find(dest interface{}, where string, vars ...interface{}) erro
 
 			// Scan the row into the values
 			if err := rows.Scan(values...); err != nil {
+				// 特殊处理NULL值错误，不要导致整个查询失败
+				if strings.Contains(err.Error(), "converting NULL to int64") {
+					s.Logger.Error("  [ERROR] Scan error with NULL value: %v", err)
+					continue // 跳过这一行，继续处理下一行
+				}
 				return err
 			}
 
@@ -238,6 +243,11 @@ func (s *Session) Find(dest interface{}, where string, vars ...interface{}) erro
 
 			// Scan the row into the values
 			if err := rows.Scan(values...); err != nil {
+				// 特殊处理NULL值错误，不要导致整个查询失败
+				if strings.Contains(err.Error(), "converting NULL to int64") {
+					s.Logger.Error("  [ERROR] Scan error with NULL value: %v", err)
+					continue // 跳过这一行，继续处理下一行
+				}
 				return err
 			}
 

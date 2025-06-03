@@ -269,8 +269,10 @@ func executeQuerySQL(query string) ([]map[string]interface{}, error) {
 	defer db.Close()
 
 	// 执行查询
+	log.Printf("执行SQL查询: %s", query)
 	rows, err := db.Raw(query).QueryRows()
 	if err != nil {
+		log.Printf("执行查询失败: %v", err)
 		return nil, fmt.Errorf("执行查询失败: %v", err)
 	}
 	defer rows.Close()
@@ -278,20 +280,23 @@ func executeQuerySQL(query string) ([]map[string]interface{}, error) {
 	// 获取列名
 	columns, err := rows.Columns()
 	if err != nil {
+		log.Printf("获取列名失败: %v", err)
 		return nil, fmt.Errorf("获取列名失败: %v", err)
 	}
+	log.Printf("查询结果包含列: %v", columns)
 
 	// 准备接收查询结果的变量
 	values := make([]interface{}, len(columns))
-	scanArgs := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
 	for i := range values {
-		scanArgs[i] = &values[i]
+		valuePtrs[i] = &values[i]
 	}
 
 	// 遍历结果集
 	for rows.Next() {
-		err = rows.Scan(scanArgs...)
+		err = rows.Scan(valuePtrs...)
 		if err != nil {
+			log.Printf("扫描行数据失败: %v", err)
 			return nil, fmt.Errorf("扫描行数据失败: %v", err)
 		}
 
@@ -299,11 +304,21 @@ func executeQuerySQL(query string) ([]map[string]interface{}, error) {
 		for i, col := range columns {
 			val := values[i]
 
-			b, ok := val.([]byte)
-			if ok {
-				row[col] = string(b)
+			// 根据不同类型进行处理
+			if val == nil {
+				row[col] = nil
 			} else {
-				row[col] = val
+				switch v := val.(type) {
+				case []byte:
+					// 字节数组转换为字符串
+					row[col] = string(v)
+				case int64, float64, bool, string, time.Time:
+					// 这些类型可以直接使用
+					row[col] = v
+				default:
+					// 其他类型尝试转为字符串
+					row[col] = fmt.Sprintf("%v", v)
+				}
 			}
 		}
 
@@ -311,9 +326,11 @@ func executeQuerySQL(query string) ([]map[string]interface{}, error) {
 	}
 
 	if err = rows.Err(); err != nil {
+		log.Printf("读取结果集时发生错误: %v", err)
 		return nil, fmt.Errorf("读取结果集时发生错误: %v", err)
 	}
 
+	log.Printf("查询返回 %d 行结果", len(results))
 	return results, nil
 }
 
@@ -589,7 +606,7 @@ func main() {
 		</head>
 		<body>
 			<h1>QSyORM 数据库管理器</h1>
-			<img src="/static/xiaoxuan.png" alt="QSyORM Logo" class="logo">
+			<img src="/static/image.png" alt="QSyORM Logo" class="logo">
 			<div class="nav">
 				<a href="/">表列表</a>
 				<a href="/sql">执行SQL</a>
@@ -1388,120 +1405,483 @@ func main() {
 			// 处理查询SQL（SELECT）
 			results, err := executeQuerySQL(sqlText)
 			if err != nil {
-				c.HTML(http.StatusInternalServerError, "error.html", gin.H{
-					"error": err.Error(),
-				})
+				// 直接渲染错误页面
+				errorHTML := fmt.Sprintf(`
+				<!DOCTYPE html>
+				<html>
+				<head>
+					<title>QSyORM 数据库管理器</title>
+					<meta charset="UTF-8">
+					<meta name="viewport" content="width=device-width, initial-scale=1.0">
+					<style>
+						body {
+							font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+							line-height: 1.5;
+							color: #333;
+							max-width: 1200px;
+							margin: 0 auto;
+							padding: 20px;
+						}
+						h1, h2, h3 {
+							color: #333;
+						}
+						.error {
+							color: #721c24;
+							background-color: #f8d7da;
+							border: 1px solid #f5c6cb;
+							padding: 10px;
+							border-radius: 4px;
+							margin-bottom: 20px;
+						}
+						.nav {
+							display: flex;
+							margin-bottom: 20px;
+							gap: 10px;
+							align-items: center;
+						}
+						.nav a {
+							padding: 8px 16px;
+							background-color: #f1f1f1;
+							color: #333;
+							text-decoration: none;
+							border-radius: 4px;
+						}
+						.nav a:hover {
+							background-color: #ddd;
+						}
+					</style>
+				</head>
+				<body>
+					<h1>QSyORM 数据库管理器</h1>
+					<div class="nav">
+						<a href="/">表列表</a>
+						<a href="/sql">执行SQL</a>
+						<a href="/create">创建表</a>
+					</div>
+					
+					<h2>执行SQL</h2>
+					<div class="error">%v</div>
+					<div>
+						<a href="javascript:history.back()">返回上一页</a>
+					</div>
+				</body>
+				</html>
+				`, err)
+				c.Data(http.StatusInternalServerError, "text/html; charset=utf-8", []byte(errorHTML))
 				return
 			}
 
 			if len(results) == 0 {
 				// 如果查询结果为空
-				c.HTML(http.StatusOK, "sql.html", gin.H{
-					"sqlText":  sqlText,
-					"executed": true,
-					"results":  results,
-					"columns":  []string{},
-					"success":  "查询执行成功，返回0行结果。",
-				})
+				emptyHTML := fmt.Sprintf(`
+				<!DOCTYPE html>
+				<html>
+				<head>
+					<title>QSyORM 数据库管理器</title>
+					<meta charset="UTF-8">
+					<meta name="viewport" content="width=device-width, initial-scale=1.0">
+					<style>
+						body {
+							font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+							line-height: 1.5;
+							color: #333;
+							max-width: 1200px;
+							margin: 0 auto;
+							padding: 20px;
+						}
+						h1, h2, h3 {
+							color: #333;
+						}
+						.alert {
+							padding: 10px;
+							border-radius: 4px;
+							margin-bottom: 20px;
+						}
+						.success {
+							color: #155724;
+							background-color: #d4edda;
+							border: 1px solid #c3e6cb;
+						}
+						.nav {
+							display: flex;
+							margin-bottom: 20px;
+							gap: 10px;
+							align-items: center;
+						}
+						.nav a {
+							padding: 8px 16px;
+							background-color: #f1f1f1;
+							color: #333;
+							text-decoration: none;
+							border-radius: 4px;
+						}
+						.nav a:hover {
+							background-color: #ddd;
+						}
+						pre {
+							background-color: #f8f9fa;
+							padding: 10px;
+							border-radius: 4px;
+							border: 1px solid #e9ecef;
+							margin-bottom: 20px;
+							overflow-x: auto;
+						}
+						textarea {
+							width: 100%%;
+							height: 150px;
+							padding: 10px;
+							margin-bottom: 10px;
+							font-family: monospace;
+							border: 1px solid #ced4da;
+							border-radius: 4px;
+						}
+						button {
+							padding: 8px 16px;
+							background-color: #4CAF50;
+							color: white;
+							border: none;
+							border-radius: 4px;
+							cursor: pointer;
+						}
+						button:hover {
+							background-color: #45a049;
+						}
+					</style>
+				</head>
+				<body>
+					<h1>QSyORM 数据库管理器</h1>
+					<div class="nav">
+						<a href="/">表列表</a>
+						<a href="/sql">执行SQL</a>
+						<a href="/create">创建表</a>
+					</div>
+					
+					<h2>执行SQL</h2>
+					
+					<form method="post" action="/sql">
+						<textarea name="sql" placeholder="输入SQL查询...">%s</textarea>
+						<button type="submit">执行</button>
+					</form>
+					
+					<div class="alert success">
+						查询执行成功，返回0行结果。
+					</div>
+					<pre>%s</pre>
+				</body>
+				</html>
+				`, sqlText, sqlText)
+				c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(emptyHTML))
 				return
 			}
 
-			c.HTML(http.StatusOK, "sql.html", gin.H{
-				"sqlText":  sqlText,
-				"executed": true,
-				"results":  results,
-				"columns":  getMapKeys(results[0]),
-			})
+			// 获取列名（字段名）
+			columns := getMapKeys(results[0])
+			log.Printf("查询结果列名: %v", columns)
+
+			// 构建表头HTML
+			var tableHead string
+			for _, col := range columns {
+				tableHead += fmt.Sprintf("<th>%s</th>", col)
+			}
+
+			// 构建表体HTML
+			var tableRows string
+			for _, row := range results {
+				tableRows += "<tr>"
+				for _, col := range columns {
+					// 确保安全访问map
+					val, exists := row[col]
+					if !exists {
+						tableRows += "<td></td>"
+					} else if val == nil {
+						tableRows += "<td>NULL</td>"
+					} else {
+						tableRows += fmt.Sprintf("<td>%v</td>", val)
+					}
+				}
+				tableRows += "</tr>"
+			}
+
+			// 构建完整HTML页面
+			resultHTML := fmt.Sprintf(`
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<title>QSyORM 数据库管理器</title>
+				<meta charset="UTF-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<style>
+					body {
+						font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+						line-height: 1.5;
+						color: #333;
+						max-width: 1200px;
+						margin: 0 auto;
+						padding: 20px;
+					}
+					h1, h2, h3 {
+						color: #333;
+					}
+					.nav {
+						display: flex;
+						margin-bottom: 20px;
+						gap: 10px;
+						align-items: center;
+					}
+					.nav a {
+						padding: 8px 16px;
+						background-color: #f1f1f1;
+						color: #333;
+						text-decoration: none;
+						border-radius: 4px;
+					}
+					.nav a:hover {
+						background-color: #ddd;
+					}
+					textarea {
+						width: 100%%;
+						height: 150px;
+						padding: 10px;
+						margin-bottom: 10px;
+						font-family: monospace;
+						border: 1px solid #ced4da;
+						border-radius: 4px;
+					}
+					button {
+						padding: 8px 16px;
+						background-color: #4CAF50;
+						color: white;
+						border: none;
+						border-radius: 4px;
+						cursor: pointer;
+					}
+					button:hover {
+						background-color: #45a049;
+					}
+					table {
+						width: 100%%;
+						border-collapse: collapse;
+						margin-bottom: 20px;
+					}
+					th, td {
+						border: 1px solid #ddd;
+						padding: 8px 12px;
+						text-align: left;
+					}
+					th {
+						background-color: #f5f5f5;
+						font-weight: bold;
+					}
+					tr:nth-child(even) {
+						background-color: #f9f9f9;
+					}
+					tr:hover {
+						background-color: #f1f1f1;
+					}
+				</style>
+			</head>
+			<body>
+				<h1>QSyORM 数据库管理器</h1>
+				<div class="nav">
+					<a href="/">表列表</a>
+					<a href="/sql">执行SQL</a>
+					<a href="/create">创建表</a>
+				</div>
+				
+				<h2>执行SQL</h2>
+				
+				<form method="post" action="/sql">
+					<textarea name="sql" placeholder="输入SQL查询...">%s</textarea>
+					<button type="submit">执行</button>
+				</form>
+				
+				<h3>结果</h3>
+				<table>
+					<thead>
+						<tr>
+							%s
+						</tr>
+					</thead>
+					<tbody>
+						%s
+					</tbody>
+				</table>
+			</body>
+			</html>
+			`, sqlText, tableHead, tableRows)
+
+			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(resultHTML))
 		} else {
 			// 处理非查询SQL（INSERT/UPDATE/DELETE）
 			rowsAffected, err := executeSQL(sqlText)
 			if err != nil {
-				c.HTML(http.StatusInternalServerError, "error.html", gin.H{
-					"error": err.Error(),
-				})
+				// 直接渲染错误页面
+				errorHTML := fmt.Sprintf(`
+				<!DOCTYPE html>
+				<html>
+				<head>
+					<title>QSyORM 数据库管理器</title>
+					<meta charset="UTF-8">
+					<meta name="viewport" content="width=device-width, initial-scale=1.0">
+					<style>
+						body {
+							font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+							line-height: 1.5;
+							color: #333;
+							max-width: 1200px;
+							margin: 0 auto;
+							padding: 20px;
+						}
+						h1, h2 {
+							color: #333;
+						}
+						.error {
+							color: #721c24;
+							background-color: #f8d7da;
+							border: 1px solid #f5c6cb;
+							padding: 10px;
+							border-radius: 4px;
+							margin-bottom: 20px;
+						}
+						.nav {
+							display: flex;
+							margin-bottom: 20px;
+							gap: 10px;
+							align-items: center;
+						}
+						.nav a {
+							padding: 8px 16px;
+							background-color: #f1f1f1;
+							color: #333;
+							text-decoration: none;
+							border-radius: 4px;
+						}
+						.nav a:hover {
+							background-color: #ddd;
+						}
+					</style>
+				</head>
+				<body>
+					<h1>QSyORM 数据库管理器</h1>
+					<div class="nav">
+						<a href="/">表列表</a>
+						<a href="/sql">执行SQL</a>
+						<a href="/create">创建表</a>
+					</div>
+					
+					<h2>错误</h2>
+					<div class="error">%v</div>
+					<div>
+						<a href="javascript:history.back()">返回上一页</a>
+					</div>
+				</body>
+				</html>
+				`, err)
+				c.Data(http.StatusInternalServerError, "text/html; charset=utf-8", []byte(errorHTML))
 				return
 			}
 
-			c.HTML(http.StatusOK, "sql.html", gin.H{
-				"sqlText":  sqlText,
-				"executed": true,
-				"success":  fmt.Sprintf("SQL执行成功，影响了 %d 行记录。", rowsAffected),
-			})
+			// 渲染成功页面
+			successHTML := fmt.Sprintf(`
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<title>QSyORM 数据库管理器</title>
+				<meta charset="UTF-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<style>
+					body {
+						font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+						line-height: 1.5;
+						color: #333;
+						max-width: 1200px;
+						margin: 0 auto;
+						padding: 20px;
+					}
+					h1, h2, h3 {
+						color: #333;
+					}
+					.alert {
+						padding: 10px;
+						border-radius: 4px;
+						margin-bottom: 20px;
+					}
+					.success {
+						color: #155724;
+						background-color: #d4edda;
+						border: 1px solid #c3e6cb;
+					}
+					.nav {
+						display: flex;
+						margin-bottom: 20px;
+						gap: 10px;
+						align-items: center;
+					}
+					.nav a {
+						padding: 8px 16px;
+						background-color: #f1f1f1;
+						color: #333;
+						text-decoration: none;
+						border-radius: 4px;
+					}
+					.nav a:hover {
+						background-color: #ddd;
+					}
+					pre {
+						background-color: #f8f9fa;
+						padding: 10px;
+						border-radius: 4px;
+						border: 1px solid #e9ecef;
+						margin-bottom: 20px;
+						overflow-x: auto;
+					}
+					textarea {
+						width: 100%%;
+						height: 150px;
+						padding: 10px;
+						margin-bottom: 10px;
+						font-family: monospace;
+						border: 1px solid #ced4da;
+						border-radius: 4px;
+					}
+					button {
+						padding: 8px 16px;
+						background-color: #4CAF50;
+						color: white;
+						border: none;
+						border-radius: 4px;
+						cursor: pointer;
+					}
+					button:hover {
+						background-color: #45a049;
+					}
+				</style>
+			</head>
+			<body>
+				<h1>QSyORM 数据库管理器</h1>
+				<div class="nav">
+					<a href="/">表列表</a>
+					<a href="/sql">执行SQL</a>
+					<a href="/create">创建表</a>
+				</div>
+				
+				<h2>执行SQL</h2>
+				
+				<form method="post" action="/sql">
+					<textarea name="sql" placeholder="输入SQL查询...">%s</textarea>
+					<button type="submit">执行</button>
+				</form>
+				
+				<div class="alert success">
+					SQL执行成功，影响了 %d 行记录。
+				</div>
+				<pre>%s</pre>
+			</body>
+			</html>
+			`, sqlText, rowsAffected, sqlText)
+
+			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(successHTML))
 		}
-	})
-
-	// 创建新表
-	r.POST("/create", func(c *gin.Context) {
-		tableName := c.PostForm("tableName")
-		log.Printf("收到创建表请求，表名: %s", tableName)
-
-		columnCount, err := strconv.Atoi(c.PostForm("columnCount"))
-		if err != nil {
-			log.Printf("解析columnCount失败: %v", err)
-			c.HTML(http.StatusBadRequest, "error.html", gin.H{
-				"error": fmt.Sprintf("解析列数量失败: %v", err),
-			})
-			return
-		}
-
-		log.Printf("表单提交的列数量: %d", columnCount)
-		columns := make([]map[string]string, 0)
-
-		// 遍历所有列
-		for i := 0; i < columnCount; i++ {
-			// 检查列名是否存在
-			columnName := c.PostForm(fmt.Sprintf("column[%d][name]", i))
-			log.Printf("处理第 %d 列，名称: %s", i, columnName)
-
-			if columnName == "" {
-				log.Printf("第 %d 列名为空，跳过", i)
-				continue // 跳过空列
-			}
-
-			column := map[string]string{
-				"name":          columnName,
-				"type":          c.PostForm(fmt.Sprintf("column[%d][type]", i)),
-				"primaryKey":    c.PostForm(fmt.Sprintf("column[%d][primaryKey]", i)),
-				"autoIncrement": c.PostForm(fmt.Sprintf("column[%d][autoIncrement]", i)),
-				"notNull":       c.PostForm(fmt.Sprintf("column[%d][notNull]", i)),
-				"unique":        c.PostForm(fmt.Sprintf("column[%d][unique]", i)),
-			}
-			log.Printf("第 %d 列的完整定义: %v", i, column)
-			columns = append(columns, column)
-		}
-
-		log.Printf("总共解析了 %d 列", len(columns))
-
-		// 确保至少有一列
-		if len(columns) == 0 {
-			log.Printf("错误: 没有有效的列定义")
-			c.HTML(http.StatusBadRequest, "error.html", gin.H{
-				"error": "表必须至少包含一列",
-			})
-			return
-		}
-
-		// 表名不能为空
-		if tableName == "" {
-			log.Printf("错误: 表名为空")
-			c.HTML(http.StatusBadRequest, "error.html", gin.H{
-				"error": "表名不能为空",
-			})
-			return
-		}
-
-		// 创建表
-		err = createTable(tableName, columns)
-		if err != nil {
-			log.Printf("调用createTable失败: %v", err)
-			c.HTML(http.StatusInternalServerError, "error.html", gin.H{
-				"error": err.Error(),
-			})
-			return
-		}
-
-		log.Printf("表 %s 创建成功，重定向到首页", tableName)
-		c.Redirect(http.StatusFound, "/")
 	})
 
 	r.Run()
